@@ -1,0 +1,43 @@
+*~
+#*
+*#
+.#*
+.settings/
+.springBeans
+target/
+bin/
+_site/
+.idea
+*.iml
+*.ipr
+*.iws
+.factorypath
+*.log
+**/logs/
+.shelf
+*.swp
+*.swo
+!.mvn/wrapper/maven-wrapper.jar
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/build/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/

@@ -1,0 +1,3 @@
+ARG ECR_HOST
+FROM ${ECR_HOST}/rcx-java-build:11-maven
+RUN apt-get update && apt-get install python -y

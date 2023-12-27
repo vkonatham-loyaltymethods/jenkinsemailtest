@@ -1,0 +1,86 @@
+Configuration:
+  Properties:
+    Property:
+      - name: log-path
+        value: ${sys:logPath:-logs}
+      - name: log-appender
+        value: ${sys:LOG_APPENDER:-Console-Pattern-Appender}
+      - name: app-name
+        value: ${sys:APPLICATION_NAME:-rcx-event-publisher}
+      - name: log-pattern
+        value: "[%-5level] %d{yyyy-MM-dd HH:mm:ss.SSS} [${app-name}, %X{consumer-id}, %X{oplog-partition}] %c - %msg%n"
+
+  Appenders:
+    Console:
+      - name: Console-Pattern-Appender
+        target: SYSTEM_OUT
+        PatternLayout:
+          pattern: ${log-pattern}
+      - name: Console-Json-Appender
+        target: SYSTEM_OUT
+        JsonLayout:
+          compact: true
+          eventEol: true
+          KeyValuePair:
+             -
+              key: "timestamp"
+              value: "$${date:yyyy-MM-dd HH:mm:ss.SSS}"
+             -
+              key: "appName"
+              value: "${app-name}"
+
+  Loggers:
+    AsyncRoot:
+      level: ${sys:LOG_LEVEL:-ERROR}
+      AppenderRef:
+        ref: ${log-appender}
+
+    AsyncLogger:
+      - name: com.rcx.events
+        additivity: false
+        level: ${sys:LOG_LEVEL:-ERROR}
+        AppenderRef:
+          - ref: ${log-appender}
+
+      - name: org.springframework
+        additivity: false
+        level: ${sys:LOG_LEVEL:-ERROR}
+        AppenderRef:
+          - ref: ${log-appender}
+            level: INFO
+
+      - name: org.apache
+        additivity: false
+        level: ERROR
+        AppenderRef:
+          - ref: ${log-appender}
+
+      - name: org.apache.helix
+        additivity: false
+        level: ERROR
+        AppenderRef:
+          - ref: ${log-appender}
+
+      - name: org.hibernate
+        additivity: false
+        level: ERROR
+        AppenderRef:
+          - ref: ${log-appender}
+
+      - name: org.eclipse
+        additivity: false
+        level: ERROR
+        AppenderRef:
+          - ref: ${log-appender}
+
+      - name: org.mongodb
+        additivity: false
+        level: ERROR
+        AppenderRef:
+          - ref: ${log-appender}
+
+      - name: io.netty
+        additivity: false
+        level: ERROR
+        AppenderRef:
+          - ref: ${log-appender}

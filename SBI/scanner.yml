@@ -1,0 +1,22 @@
+version: "3.0"
+
+services:
+  db:
+    container_name: db
+    image: arminc/clair-db:latest
+    restart: unless-stopped
+
+  clair:
+    container_name: clair
+    image: arminc/clair-local-scan:latest
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "6060:6060"
+    links:
+      - db:postgres
+networks:
+  default:
+    external:
+      name: rcx_sbi

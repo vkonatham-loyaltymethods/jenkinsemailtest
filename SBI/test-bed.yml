@@ -1,0 +1,24 @@
+version: '3'
+services:
+     
+  maven-app-build-11:
+     user: "${USERID}:${GROUPID}"
+     image: rcx-java-11-build-cover:latest
+     build:
+      context: ${WORKSPACE}/SBI
+      dockerfile: build/cover/dockerfile
+      args:
+        ECR_HOST: ${ECR_HOST}
+     volumes:
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - "${JENKINS_HOME}:${JENKINS_HOME}:rw"
+      - "${WORKSPACE}:${WORKSPACE}:rw"
+     environment:
+       NEXUS_USERNAME: $NEXUS_USERNAME
+       NEXUS_PASSWORD: $NEXUS_PASSWORD
+       NEXUS_REPO: $NEXUS_REPO
+networks:
+  default:
+    external:
+      name: rcx_sbi

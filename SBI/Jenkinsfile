@@ -1,0 +1,257 @@
+#!groovy
+
+pipeline {
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '5'))
+    disableConcurrentBuilds()
+    ansiColor('xterm')
+  }
+  environment {
+     NEXUS_USERNAME = credentials('NEXUS_USERNAME')
+     NEXUS_PASSWORD = credentials('NEXUS_PASSWORD')
+     GIT_USERNAME = credentials('GIT_USERNAME')
+     GIT_PASSWORD = credentials('GIT_PASSWORD')
+  }
+  agent any
+  stages {
+    stage('Build') {
+      parallel {
+        stage('AMD64 Build') {
+          agent {label 'primary-slave'}
+          steps {
+            script {
+              /* sh '''
+                SBI/build.sh
+              ''' */
+              echo "testing"
+            }
+          }
+        }
+        stage('ARM64 Build') {
+          agent {label 'arm64-slave'}
+          steps {
+            script {
+              /* sh '''
+                SBI/build.sh
+              ''' */
+              echo "testing2"
+            }
+          }
+        }
+      }
+    }
+    stage('Test') {
+      parallel {
+        stage('AMD64 Test') {
+          agent {label 'primary-slave'}
+          steps {
+            script {
+              /* sh '''
+                SBI/test.sh
+              ''' */
+              echo "testing3"
+            }
+          }
+        }
+        stage('ARM64 Test') {
+          agent {label 'arm64-slave'}
+          steps {
+            script {
+              /*sh '''
+                SBI/test.sh
+              '''*/
+              echo "testing4"
+            }
+          }
+        }
+      }
+    }
+    stage('Checkstyle') {
+      steps {
+        step([$class: 'CheckStylePublisher',
+          canRunOnFailed: true,
+          defaultEncoding: '',
+          pattern: '**/checkstyle-*.xml',
+          healthy: '',
+          unHealthy: '',
+          useStableBuildAsReference: true
+        ])
+      }
+    }
+    stage('Jacoco') {
+      when {
+        expression {
+          fileExists("target/site/cobertura/coverage.xml") ||  \
+          fileExists("target/site/cobertura/digital-coverage.xml")
+        }
+      }
+      steps {
+        step([$class: 'CoberturaPublisher',
+          autoUpdateHealth: false,
+          autoUpdateStability: false,
+          coberturaReportFile: 'target/site/cobertura/*.xml',
+          failUnhealthy: false,
+          failUnstable: false,
+          maxNumberOfBuilds: 0, onlyStable: false, sourceEncoding: 'ASCII',
+          zoomCoverageChart: false
+        ])
+      }
+    }
+    stage('Container Build') {
+      when {
+        environment name: 'CHANGE_ID', value: ''
+        expression {
+          fileExists("SBI/dockerize.sh")
+        }
+      }
+      parallel {
+        stage('AMD64 Container Image Build') {
+          agent {label 'primary-slave'}
+          steps {
+            script {
+              /*sh '''
+                SBI/dockerize.sh
+              '''*/
+              echo "testing6"
+            }
+          }
+        }
+        stage('ARM64 Container Image Build') {
+          agent {label 'arm64-slave'}
+          steps {
+            script {
+              /*sh '''
+                SBI/dockerize.sh
+              '''*/
+              sh '''exit 1'''
+            }
+          }
+        }
+      }
+    }
+  }
+  post {
+        always {
+            script {
+                currentBuild.result = currentBuild.currentResult
+                if (fileExists('build_fail.log')) {
+                    processBuildFailLog()
+                }
+            }
+        }
+        success {
+            script {
+                handleScanStatusSuccess()
+            }
+        }
+        fixed {
+            script {
+                sendEmailOnBuildFixed()
+            }
+        }
+        failure {
+            script {
+                handleBuildFailure()
+            }
+        }
+        unstable {
+            script {
+                sendEmailOnUnstablePipeline()
+            }
+        }
+    }
+}
+// Function to process build_fail.log
+def processBuildFailLog() {
+    sh '''
+        tail -50 build_fail.log  >> build_fail.txt &&
+        rm -f build_fail.log &&
+        mv build_fail.txt build_fail.log &&
+        rm -f build_fail.log-txt* &&
+        unix2dos -f build_fail.log
+    '''
+}
+
+// Function to handle scan status success
+def handleScanStatusSuccess() {
+    if (fileExists('scan_status.log')) {
+        env.SCAN_STATUS = readFile('scan_status.log').trim()
+        if (env.SCAN_STATUS == 'fail') {
+            sendEmailOnScanFailure()
+        }
+    }
+}
+
+// Function to send email on build fixed
+def sendEmailOnBuildFixed() {
+    emailext(attachLog: true, body: "${currentBuild.result}: ${BUILD_URL}", compressLog: true,
+        subject: "Jenkins build back to normal: ${currentBuild.fullDisplayName}",
+        recipientProviders: [[$class: 'CulpritsRecipientProvider'], [$class: 'RequesterRecipientProvider']],
+        to: getRecipientEmail())
+}
+
+// Function to handle build failure
+def handleBuildFailure() {
+    if (fileExists('build_fail.log')) {
+        sendEmailOnBuildFailure('build_fail.log')
+    } else {
+        sendEmailOnBuildFailure(null)
+    }
+}
+
+// Function to send email on unstable pipeline
+def sendEmailOnUnstablePipeline() {
+    emailext(attachLog: true, body: "${currentBuild.result}: ${BUILD_URL}", compressLog: true,
+        subject: "Unstable Pipeline: ${currentBuild.fullDisplayName}",
+        recipientProviders: [[$class: 'CulpritsRecipientProvider'], [$class: 'RequesterRecipientProvider']],
+        to: getRecipientEmail())
+}
+
+// Function to send email on scan failure
+def sendEmailOnScanFailure() {
+    emailext(attachmentsPattern: 'scan_report.log',
+        body: "${currentBuild.result}: ${BUILD_URL}",
+        subject: "Build failed in Jenkins due to image scan failure: ${currentBuild.fullDisplayName}",
+        to: getRecipientEmail())
+}
+
+// Function to send email on build failure
+def sendEmailOnBuildFailure(attachment) {
+    emailext(attachmentsPattern: attachment,
+        body: "${currentBuild.result}: ${BUILD_URL}",
+        subject: "Build failed in Jenkins: ${currentBuild.fullDisplayName}",
+        to: getRecipientEmail())
+}
+
+def getTopLevelFolderName(jobName) {
+    def parts = jobName.split('/')
+    return parts.size() > 1 ? parts[0] : ''
+}
+
+// Function to get recipient email based on branch name
+def getRecipientEmail() {
+    def jobName = env.JOB_NAME
+    echo "JOB_NAME : ${env.JOB_NAME}"
+    echo "BRANCH_NAME: ${env.BRANCH_NAME}"
+    def folderName = getTopLevelFolderName(jobName).trim()
+    echo "folderName : ${folderName}"
+    if (env.BRANCH_NAME ==~ /^PR-.*/) {
+        return env.CHANGE_AUTHOR_EMAIL
+    } else if ( (env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("RCX Core".equals(folderName) || "RCX POS Adapter".equals(folderName) || "RCX Mongo Export".equals(folderName) || "RCX-POS-Conexxus".equals(folderName) || "RCX-BP-Service".equals(folderName) || "RCX-MGM-Service".equals(folderName) || "RCX-WU-Service".equals(folderName) || "RCX-SPWY-Service".equals(folderName)) ) {
+        return 'rcxjavaoffshore@loyaltymethods.com,rcx-devops@loyaltymethods.com'
+    }
+      else if ((env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("RCX Core".equals(folderName))){
+      return 'rcxcoreteam@loyaltymethods.com,rcx-devops@loyaltymethods.com'
+    }
+      else if ((env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("RCX BI".equals(folderName)) ){
+      return 'data-dev@loyaltymethods.com,RCX-Data-QA@loyaltymethods.com,rcx-devops@loyaltymethods.com'
+    }
+      else if ((env.BRANCH_NAME == 'develop'|| env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/ && "RCX-QA-Test-Automation".equals(folderName)){
+      return 'RCX-QA-Offshore@loyaltymethods.com,rcx-devops@loyaltymethods.com'
+    }
+      else if (env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'qa') {
+        return 'RCXHydTeam@loyaltymethods.com'
+    } else {
+        return 'rcx-devops@loyaltymethods.com'
+    }
+}

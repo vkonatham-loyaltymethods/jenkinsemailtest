@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: rcx-event-publisher
+  cloud:
+    config:
+      server:
+        health:
+          enabled: false
+        bootstrap: true
+        git:
+          uri: ${GIT_URI:https://github.com/reactorcx/rcx-event-publisher-config}
+          searchPaths: 
+            - config-server-properties/rcx-event-publisher
+            - config-server-properties/rcx-event-publisher/${SUB_SERVICE}
+            - config-server-properties/rcx-event-publisher/${SUB_SERVICE}/${PROFILE:local}
+          username: ${GIT_USERNAME}
+          password: ${GIT_PASSWORD}
+      label: ${GIT_BRANCH:develop}
+      name: rcx-event-publisher
+    stream:
+      kafka:
+        binder:
+          auto-create-topics: false
+      bindings:
+        springCloudBusOutput:
+          destination: ${CLOUD_BUS_TOPIC:eventPublisherCloudBus}
+          group: ${KAFKA_CONSUMER_GROUP_ID}-bus-${HOSTNAME}
+        springCloudBusInput:
+          destination: ${CLOUD_BUS_TOPIC:eventPublisherCloudBus}
+          group: ${KAFKA_CONSUMER_GROUP_ID}-bus-${HOSTNAME}

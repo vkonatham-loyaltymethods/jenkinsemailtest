@@ -1,0 +1,242 @@
+#!/bin/bash
+
+################################################################################
+# Entrypoint for RCX EVENT PUBLISHER
+#
+# The following variables control behavior before startup:
+#
+# RCX_DEBUG         If 'true' will output all exported environment variables
+#
+# The following variables are needed for generating the RabbitMQ Keystores:
+# DB_CA_CERT                RabbitMQ CA certificate
+# DB_CLIENT_CERT            RabbitMQ Client certificate
+# DB_CLIENT_KEY             RabbitMQ Client certificate key
+# DB_CLIENT_KEY_PASS        RabbitMQ Client certificate key passphrase
+# KAFKA_CA_CERT             RabbitMQ CA certificate
+# KAFKA_CLIENT_CERT         RabbitMQ Client certificate
+# KAFKA_CLIENT_KEY          RabbitMQ Client certificate key
+# KAFKA_CLIENT_KEY_PASS     RabbitMQ Client certificate key passphrase
+################################################################################
+
+CERT_PATH=/tmp
+ 
+error() {
+    echo $1 >&2
+    exit 1
+}
+
+mongodb_key()
+{
+    local error=0
+    for var in DB_CA_CERT DB_CLIENT_CERT DB_CLIENT_KEY \
+        DB_CLIENT_KEY_PASS
+    do
+        eval check=\$$var
+        if [ -z "$check" ]
+        then
+            echo "$var variable must be set!" >&2
+            error=1
+        fi
+    done
+    [ $error -ne 0 ] && error "Set the above variables and re-run"
+
+    echo "Creating certificate files..."
+
+    # For Mongo DB certificates
+    local DNAME=$CERT_PATH/db
+    local DCA=$DNAME-ca.pem
+    local DKEYSTORE=$DNAME.keystore.jks
+    local DTRUSTSTORE=$DNAME.truststore.jks
+
+# Mongo DB certificates settings
+
+    echo "$DB_CA_CERT" > $DCA
+    [ $? -ne 0 ] && error "Cannot write CA file $DCA"
+    unset DB_CA_CERT
+    echo "$DB_CLIENT_CERT" > $DNAME.crt
+    [ $? -ne 0 ] && error "Cannot write cert file $DNAME.crt"
+    unset DB_CLIENT_CERT
+    echo "$DB_CLIENT_KEY" > $DNAME.key
+    [ $? -ne 0 ] && error "Cannot write key file $DNAME.key"
+    unset DB_CLIENT_KEY
+    export MONGO_KEYSTORE_LOCATION=$DKEYSTORE
+    export MONGO_TRUSTSTORE_LOCATION=$DTRUSTSTORE
+    export MONGO_KEYSTORE_PASS=$(openssl rand -base64 9)
+    export MONGO_TRUSTSTORE_PASS=$(openssl rand -base64 9)
+    export DB_KEYSTORE_TYPE=JKS
+    export DB_TRUSTSTORE_TYPE=JKS
+
+    echo "Creating Keystores for MongoDB..."
+    openssl pkcs12 -export -out $DNAME.p12 -inkey $DNAME.key -in $DNAME.crt \
+      -certfile $DCA -passout pass:$DB_CLIENT_KEY_PASS \
+      -passin pass:$DB_CLIENT_KEY_PASS
+    [ $? -ne 0 ] && error "Cannot create PKCS12 cert $DNAME.p12"
+
+    keytool -importkeystore -srckeystore $DNAME.p12 \
+      -destkeystore $DKEYSTORE \
+      -srcstoretype PKCS12 -srcstorepass $DB_CLIENT_KEY_PASS \
+      -deststorepass $MONGO_KEYSTORE_PASS \
+      -destkeypass $MONGO_KEYSTORE_PASS -srcalias 1
+    [ $? -ne 0 ] && error "Cannot create keystore $DKEYSTORE"
+    unset DB_CLIENT_KEY_PASS
+
+    yes | keytool -keystore $DTRUSTSTORE -alias CARoot -import \
+      -file $DCA -deststorepass $MONGO_TRUSTSTORE_PASS
+    [ $? -ne 0 ] && error "Cannot create truststore $DTRUSTSTORE"
+}
+
+kafka_key()
+{
+local error=0
+    for var in KAFKA_CA_CERT KAFKA_CLIENT_CERT \
+        KAFKA_CLIENT_KEY KAFKA_CLIENT_KEY_PASS
+    do
+        eval check=\$$var
+        if [ -z "$check" ]
+        then
+            echo "$var variable must be set!" >&2
+            error=1
+        fi
+    done
+    [ $error -ne 0 ] && error "Set the above variables and re-run"
+
+    echo "Creating certificate files..."
+
+# For Kafka certificates
+    local KNAME=$CERT_PATH/kafka
+    local KCA=$KNAME-ca.pem
+    local KKEYSTORE=$KNAME.keystore.jks
+    local KTRUSTSTORE=$KNAME.truststore.jks
+
+# Kafka Certificates settings
+
+    echo "$KAFKA_CA_CERT" > $KCA
+    [ $? -ne 0 ] && error "Cannot write CA file $KCA"
+    unset KAFKA_CA_CERT
+    echo "$KAFKA_CLIENT_CERT" > $KNAME.crt
+    [ $? -ne 0 ] && error "Cannot write cert file $KNAME.crt"
+    unset KAFKA_CLIENT_CERT
+    echo "$KAFKA_CLIENT_KEY" > $KNAME.key
+    [ $? -ne 0 ] && error "Cannot write key file $KNAME.key"
+    unset KAFKA_CLIENT_KEY
+    export KAFKA_KEYSTORE_LOCATION=file:$KKEYSTORE
+    export KAFKA_TRUSTSTORE_LOCATION=file:$KTRUSTSTORE
+    export KAFKA_KEYSTORE_PASSWORD=$(openssl rand -base64 9)
+    export KAFKA_TRUSTSTORE_PASSWORD=$(openssl rand -base64 9)
+    export KAFKA_KEYSTORE_TYPE=JKS
+    export KAFKA_TRUSTSTORE_TYPE=JKS
+
+    echo "Creating Keystores for KAFKA..."
+    openssl pkcs12 -export -out $KNAME.p12 -inkey $KNAME.key -in $KNAME.crt \
+      -certfile $KCA -passout pass:$KAFKA_CLIENT_KEY_PASS \
+      -passin pass:$KAFKA_CLIENT_KEY_PASS
+    [ $? -ne 0 ] && error "Cannot create PKCS12 cert $KNAME.p12"
+    keytool -importkeystore -srckeystore $KNAME.p12 \
+      -destkeystore $KKEYSTORE \
+      -srcstoretype PKCS12 -srcstorepass $KAFKA_CLIENT_KEY_PASS \
+      -deststoretype JKS -deststorepass $KAFKA_KEYSTORE_PASSWORD \
+      -destkeypass $KAFKA_KEYSTORE_PASSWORD -srcalias 1
+    [ $? -ne 0 ] && error "Cannot create keystore $KKEYSTORE"
+    unset KAFKA_CLIENT_KEY_PASS
+
+    yes | keytool -keystore $KTRUSTSTORE -alias CARoot -import \
+      -file $KCA -deststoretype JKS -deststorepass $KAFKA_TRUSTSTORE_PASSWORD
+    [ $? -ne 0 ] && error "Cannot create truststore $KTRUSTSTORE"
+}
+
+_decrypt() {
+    local ENC=$1
+
+    PLAIN=$(aws kms decrypt --ciphertext-blob fileb://<(echo $ENC | base64 --decode) --output text --query Plaintext | base64 --decode)
+    if [ -z "$PLAIN" ]
+    then
+        echo "ERROR: Failed to decrypt string" >&2
+    fi
+    echo $PLAIN
+}
+
+decrypt() {
+    local VAR=$1
+
+    if [ -n "$VAR" ]
+    then
+        echo $VAR | grep "^ENC{[a-zA-Z0-9+/=]*}$" >/dev/null
+        if [ $? -eq 0 ]
+        then
+            ENC=$(echo $VAR | sed 's/^ENC{//; s/}$//')
+            VAR=$(_decrypt $ENC)
+        fi
+        echo $VAR
+    fi
+
+}
+
+_get_parm() {
+    aws ssm get-parameter --name $1 --query 'Parameter.Value' --output text --with-decryption
+}
+
+_retrieve() {
+    value=$(_get_parm $1)
+    if [ $? -ne 0 ] || [ -z "$value" ]
+    then
+        echo "ERROR: Failed to retrieve parameter $1" >&2
+        return
+    fi
+    echo "$value"
+}
+
+retrieve() {
+    local parm=$1
+    local value=''
+
+    if [ -n "$parm" ]
+    then
+        echo $parm | grep "PARM:" >/dev/null
+        if [ $? -eq 0 ]
+        then
+            parm=$(echo $parm | sed 's/^PARM://')
+            value=$(_retrieve $parm)
+        fi
+        echo "$value"
+    fi
+}
+
+for var in $(set|grep "=PARM:"|cut -d= -f1)
+do
+    eval $var=\'"$(eval retrieve \$$var)"\'
+done
+
+for var in $(set|grep "='ENC{"|cut -d= -f1)
+do
+    eval $var=\'$(eval decrypt \$$var)\'
+done
+
+mongodb_key
+kafka_key
+
+if [ -n "$RCX_DEBUG" ]
+then
+    RCX_DEBUG=$(echo $RCX_DEBUG | tr '[A-Z]' '[a-z]')
+    [ $RCX_DEBUG == 'true' ] && export
+fi
+
+PROFILE=${PROFILE:-development}
+term() {
+echo "got SIGTERM"
+}
+quit() {
+echo "got SIGQUIT"
+}
+exit0() {
+echo "got exit 0"
+}
+int() {
+echo "got SIGINT"
+}
+
+trap exit0 0
+trap int 2
+trap quit 3
+trap term 15
+
+exec java $JAVA_OPTS -DLOG_LEVEL=$LOG_LEVEL -DAPPLICATION_NAME=$APPLICATION_NAME -Dnewrelic.config.app_name=$APPLICATION_NAME-$PROFILE -javaagent:/home/rcx/newrelic/newrelic.jar -jar -Dspring.profiles.active=$PROFILE rcx-event-publisher-*.jar
