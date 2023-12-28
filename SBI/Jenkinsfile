@@ -121,7 +121,7 @@ pipeline {
           steps {
             script {
               /*sh '''
-                SBI/dockerize.sh
+                #SBI/dockerize.sh
               '''*/
               sh '''exit 1'''
             }
