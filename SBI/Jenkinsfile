@@ -61,6 +61,7 @@ pipeline {
                 SBI/test.sh
               '''*/
               echo "testing4"
+              sh "exit 1"
             }
           }
         }
