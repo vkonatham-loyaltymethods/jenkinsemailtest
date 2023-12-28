@@ -258,6 +258,7 @@ def getRecipientEmail() {
     echo "BRANCH_NAME: ${env.BRANCH_NAME}"
     def viewName = getViewNameForJob(jobName)
     echo "VIEW_NAME: ${viewName}"
+    echo "CHANGE_AUTHOR_EMAIL: ${env.CHANGE_AUTHOR_EMAIL}"
     if (env.BRANCH_NAME ==~ /^PR-.*/) {
         return env.CHANGE_AUTHOR_EMAIL
     } else if ((env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("Java".equals(viewName) || "Models".equals(viewName) || "Clients".equals(viewName) || "JavaOngoing".equals(viewName))){
