@@ -134,9 +134,7 @@ pipeline {
         always {
             script {
                 currentBuild.result = currentBuild.currentResult
-                if (fileExists('build_fail.log')) {
                     processBuildFailLog()
-                }
             }
         }
         success {
@@ -164,12 +162,11 @@ pipeline {
 // Function to process build_fail.log
 def processBuildFailLog() {
     sh '''
-        tail -50 build_fail.log  >> build_fail.txt &&
-        rm -f build_fail.log &&
-        mv build_fail.txt build_fail.log &&
-        rm -f build_fail.log-txt* &&
-        unix2dos -f build_fail.log
-    '''
+          if  [ -f build_fail.log ];then
+            tail -50 build_fail.log  >> build_fail.txt && rm -f build_fail.log && mv build_fail.txt build_fail.log && \
+            rm -f build_fail.log-txt* && unix2dos -f build_fail.log
+          fi
+       '''
 }
 
 // Function to handle scan status success
@@ -210,6 +207,7 @@ def sendEmailOnUnstablePipeline() {
 // Function to send email on scan failure
 def sendEmailOnScanFailure() {
     emailext(attachmentsPattern: 'scan_report.log',
+        attachLog: true,
         body: "${currentBuild.result}: ${BUILD_URL}",
         subject: "Build failed in Jenkins due to image scan failure: ${currentBuild.fullDisplayName}",
         to: getRecipientEmail())
@@ -218,14 +216,39 @@ def sendEmailOnScanFailure() {
 // Function to send email on build failure
 def sendEmailOnBuildFailure(attachment) {
     emailext(attachmentsPattern: attachment,
+        attachLog: true,
         body: "${currentBuild.result}: ${BUILD_URL}",
         subject: "Build failed in Jenkins: ${currentBuild.fullDisplayName}",
         to: getRecipientEmail())
 }
 
-def getTopLevelFolderName(jobName) {
-    def parts = jobName.split('/')
-    return parts.size() > 1 ? parts[0] : ''
+def getViewNameForJob(jobName) {
+    def jobNameParts = jobName.split('/')
+
+    // Iterate through top-level views
+    for (view in Jenkins.instance.views) {
+        if (view instanceof ListView && view.items.find { it.name in jobNameParts }) {
+            return view.name
+        } else if (view instanceof hudson.plugins.nested_view.NestedView) {
+            // Iterate through nested views
+            def nestedViews = view.getViews()
+            for (nestedView in nestedViews) {
+                if (nestedView.items.find { it.name in jobNameParts }) {
+                    return nestedView.name
+                }
+            }
+        }
+    }
+    // If no matching view is found, return null
+    return null
+}
+
+def printJobAndView(jobName, parentView, nestedView = null) {
+    if (nestedView != null) {
+        println("Job Name: ${jobName}, View: ${parentView}, Nested View: ${nestedView}")
+    } else {
+        println("Job Name: ${jobName}, View: ${parentView}")
+    }
 }
 
 // Function to get recipient email based on branch name
@@ -233,20 +256,20 @@ def getRecipientEmail() {
     def jobName = env.JOB_NAME
     echo "JOB_NAME : ${env.JOB_NAME}"
     echo "BRANCH_NAME: ${env.BRANCH_NAME}"
-    def folderName = getTopLevelFolderName(jobName).trim()
-    echo "folderName : ${folderName}"
+    def viewName = getViewNameForJob(jobName)
+    echo "VIEW_NAME: ${viewName}"
     if (env.BRANCH_NAME ==~ /^PR-.*/) {
         return env.CHANGE_AUTHOR_EMAIL
-    } else if ( (env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("RCX Core".equals(folderName) || "RCX POS Adapter".equals(folderName) || "RCX Mongo Export".equals(folderName) || "RCX-POS-Conexxus".equals(folderName) || "RCX-BP-Service".equals(folderName) || "RCX-MGM-Service".equals(folderName) || "RCX-WU-Service".equals(folderName) || "RCX-SPWY-Service".equals(folderName)) ) {
+    } else if ((env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("Java".equals(viewName) || "Models".equals(viewName) || "Clients".equals(viewName) || "JavaOngoing".equals(viewName))){
         return 'rcxjavaoffshore@loyaltymethods.com,rcx-devops@loyaltymethods.com'
     }
-      else if ((env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("RCX Core".equals(folderName))){
+      else if ((env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("Nodejs".equals(viewName) || "CoreOngoing".equals(viewName))){
       return 'rcxcoreteam@loyaltymethods.com,rcx-devops@loyaltymethods.com'
     }
-      else if ((env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("RCX BI".equals(folderName)) ){
+      else if ((env.BRANCH_NAME == 'develop' || env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("BI".equals(viewName)) ){
       return 'data-dev@loyaltymethods.com,RCX-Data-QA@loyaltymethods.com,rcx-devops@loyaltymethods.com'
     }
-      else if ((env.BRANCH_NAME == 'develop'|| env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/ && "RCX-QA-Test-Automation".equals(folderName)){
+      else if ((env.BRANCH_NAME == 'develop'|| env.BRANCH_NAME ==~ /^feature-.*/ || env.BRANCH_NAME ==~ /^bug-.*/ || env.BRANCH_NAME ==~ /^hotfix-.*/) && ("QA".equals(viewName))){
       return 'RCX-QA-Offshore@loyaltymethods.com,rcx-devops@loyaltymethods.com'
     }
       else if (env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'qa') {
